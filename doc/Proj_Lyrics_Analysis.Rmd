@@ -1,0 +1,303 @@
+---
+title: "Genre Sentiment Analysis"
+author: "Syed Ahsan Bukhari - SAB2302"
+date: "9/17/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+<br>
+
+With the rise of opinion mining and sentiment analysis, the fact of ﬁnding outwhat people think and feel has become a necessity. In relation to music, This work aims to classify music by the emotions produced when a person is listening to a musical fragment. 
+<br>
+
+To do so, we are building base level understanding of dataset which contains artist, year and genre features for diﬀerent songs. Our ﬁnal goal is to label genre with diﬀerent emotions and look at most impacted genre on each emotion category.
+
+<p align="center">
+![](/Users/ahsan.bukhari/Project/Columbia/AppliedDS/fall2019-proj1--sab2302/figs/genre_startup.png){ width=70% }
+</p>
+
+<br>
+
+## Analysis Approach 
+<br>
+To explore specific to one genre of music, let's look at the lyrics data in different prespective to figure out associated sentiments. In essence, we are trying to determine the emotional tone behind a series of words, used in different lyrics and link to specific genre. 
+<br>
+This analysis will be covered in following steps:
+
+<br>
+
++ Positive & Negative Emotion analysis - Entire Dataset
++ Mapping of NRC Eight Emotion on genre
++ Deep down analysis of unusual genre sentiment
++ Summary
++ Recommendation
+
+#### Mandatory Packages and clean dataset availability
+<br>
+
+From the packages' descriptions:
+
++ `tm` is a framework for text mining applications within R;
++ `data.table` is a package for fast aggregation of large data;
++ `tidyverse` is an opinionated collection of R packages designed for data science. All packages share an underlying design philosophy, grammar, and data structures;
++ `tidytext` allows text mining using 'dplyr', 'ggplot2', and other tidy tools;
++ `DT` provides an R interface to the JavaScript library DataTables.
++ `stringr` A consistent, simple and easy to use set of wrappers around the fantastic 'stringi' package. All function and argument names (and positions) are consistent, all functions deal with "NA"'s and zero length vectors in the same way, and the output from one function is easy to feed into the input of another.
++ `qdap` associated with quantitative discourse analysis of transcripts containing discourse. The package provides parsing tools for preparing transcript data, coding tools and analysis tools for richer understanding of the data
++ `lexicon` A collection of lexical hash tables, dictionaries, and word lists.
++ `ggthemes`  contains extra themes, scales, and geoms, and functions for and related to ggplot2.
++ `wordcloud` Plot a word cloud.
++ `sqldf` SQL select on data frames.
+
+From Clean dataset load: 
+
+This analysis has used "Text_Processing.rmd" to clean & process raw dataset of lyrics and then named output file as "Cleaned_Lyrics.RData" 
+
+```{r load libraries, warning=FALSE, message=FALSE, echo = FALSE}
+
+packages.used=c("tm", "data.table", "qdap", 
+                "stringr", "tidytext", "tidyverse",
+                "DT", "lexicon", "ggthemes", 
+                "wordcloud", "sqldf")
+
+library(tm)
+library(data.table)
+library(tidytext)
+library(tidyverse)
+library(DT)
+library(stringr)
+library(qdap)
+library(lexicon)
+library(ggthemes)
+library(wordcloud)
+library(sqldf)
+
+# load Processed lyrics data
+load('/Users/ahsan.bukhari/Project/Columbia/AppliedDS/fall2019-proj1--sab2302/output/cleaned_lyrics.RData') 
+
+
+```
+
+## Positive & Negative Emotion analysis - Entire Dataset
+<br>
+#### Top 25 common words
+<br>
+Part of initial data exploration, since dataset is text heavy so would like to look at top 25 famous words.
+
+```{r top 25 words, warning=FALSE, message=FALSE }
+plot(freq_terms(text.var = dt_lyrics$stemmedwords,top = 25))
+
+```
+
+#### Postive and Negative Emotions using NRC
+<br>
+To define emotions category, we are consuming NRC sentiment dictionary to calculate the presence of eight different emotions and their corresponding valence. 
+
+```{r postive and negative words, warning=FALSE, message=FALSE}
+nrc = read.table(file = 'https://raw.githubusercontent.com/pseudorational/data/master/nrc_lexicon.txt',header = F,col.names = c('word','sentiment','num'),sep = '\t'); nrc = nrc[nrc$num!=0,]; nrc$num = NULL
+
+#head(hash_sentiment_nrc)
+
+dt_lyrics%>%
+  group_by(id)%>%
+  unnest_tokens(output = word, input = stemmedwords)%>%
+  inner_join(nrc)%>%
+  group_by(sentiment)%>%
+  filter(sentiment %in% c('positive','negative'))%>%
+  count()%>%
+  ggplot(aes(x=sentiment,y=n,fill=sentiment))+geom_col()+theme_economist()+guides(fill=F)+
+  coord_flip()
+
+```
+
+
+#### Postive and Negative Emotions using mjocker
+<br>
+Idea to consume mjocker for further identification of dictionary usage and accuracy of marking of positive and negative emotions. 
+
+reference:https://github.com/mjockers/syuzhet
+
+```{r postive and negative words using mjocker, warning=FALSE, message=FALSE}
+
+# using key sentiment jockers
+dt_lyrics %>%
+  select(id,stemmedwords)%>%
+  group_by(id)%>%
+  unnest_tokens(output=word,input=stemmedwords)%>%
+  inner_join(key_sentiment_jockers)%>%
+  summarize(lyricsSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=lyricsSentiment,fill=lyricsSentiment>0))+
+  geom_histogram(binwidth = 0.1)+
+  scale_x_continuous(breaks=seq(-5,5,1))+scale_fill_manual(values=c('tomato','seagreen'))+
+  guides(fill=F)+
+  theme_wsj(color = "blue")
+
+```
+
+
+#### Postive and Negative Emotions using wordcloud
+<br>
+Finally, we are consolidating positive and negative emotions via wordcloud which shows almost equal contribution of emotions in overall dataset.
+
+```{r wordcloud of lyrics of postive and negative, warning=FALSE, message=FALSE}
+
+wordcloudData = 
+  dt_lyrics%>%
+  group_by(id)%>%
+  unnest_tokens(output=word,input=stemmedwords)%>%
+  inner_join(nrc)%>%
+  ungroup()%>%
+  count(sentiment,word,sort=T)%>%
+  spread(key=sentiment,value = n,fill=0)%>%
+  data.frame()
+rownames(wordcloudData) = wordcloudData[,'word']
+wordcloudData = wordcloudData[,c('positive','negative')]
+comparison.cloud(term.matrix = wordcloudData,scale = c(2,0.5),max.words = 250, rot.per=0)
+
+```
+
+## Mapping of NRC Eight Emotion on genre
+<br>
+When people talk about the history of music, rock 'n' roll is always the hero. But a study from the University of London, Imperial College London has revealed that rock 'n' roll isn't all it's cracked up to be.
+
+In the last half-century, hip-hop has actually proven to be the most influential genre in popular music. 
+
+
+#### Genre mapping to each NRC emotion
+<br>
+Now, this mapping has highlighted "hip-hop" as a prominent genre among all to disrupt emotional scale.
+
+```{r emotional analysis deeper to genre, warning=FALSE, message=FALSE}
+
+
+dt_lyrics%>%
+  group_by(id)%>%
+  unnest_tokens(output = word, input = stemmedwords)%>%
+  inner_join(nrc)%>%
+  group_by(id,sentiment,genre)%>%
+  count()%>%
+  group_by(sentiment, genre)%>%
+  filter(!genre %in% c('Other','Not Available'))%>%
+  summarize(n = mean(n))%>%
+  ungroup()%>%
+  ggplot(aes(x=genre,y=n,fill=sentiment))+
+  geom_col()+
+  facet_wrap(~sentiment)+
+  guides(fill=F)+coord_flip()
+
+```
+
+<br>
+## Deep down analysis of unusual genre sentiment
+<br>
+#### Word count associated to specific genre
+<br>
+To explore this aspect, let's take word count against all genre which will help us to know, if hip-hop has higher value of word count then this disruption can be ignored. 
+
+```{r hip-hop analysis, warning=FALSE, message=FALSE}
+
+genre_word_count = dt_lyrics %>%
+  select(genre,stemmedwords)%>%
+  group_by(genre)%>%
+  unnest_tokens(output = word,input=stemmedwords)%>%
+  group_by(genre)%>%
+  filter(!genre %in% c('Other','Not Available'))%>%
+  count()   # count is a shortcut to summarize used above
+ggplot(genre_word_count,aes(x=reorder(genre,desc(n)),y=n,fill=genre))+geom_bar(position='dodge',stat='identity')+xlab('genre')+ylab('word_count')+coord_flip()
+
+```
+
+As we can see 'Rock' has the highest number of word count overall and Hip-hop is second largest. let's deep down further to look at list of songs associated to each genre. 
+
+<br>
+#### Songs associated to specific genre
+<br>
+List of songs associated to each genre will help us to mark a point, if Hip-hop has higher number of songs then it could be a possibility of such variation. 
+
+```{r list of songs for genre, warning=FALSE, message=FALSE}
+
+genre_song_list = dt_lyrics %>%
+  select(id,genre)%>%
+  group_by(genre)%>%
+  filter(!genre %in% c('Other','Not Available'))%>%
+  count()   # count is a shortcut to summarize used above
+
+genre_list = cbind(genre_song_list,genre_word_count)
+genre_list$genre1 = NULL
+
+ggplot(genre_song_list,aes(x=reorder(genre,desc(n)),y=n,fill=n))+geom_bar(position='dodge',stat='identity')+xlab('genre')+ylab('songs_count')+coord_flip()
+
+```
+
+
+
+#### Artist associated to genre
+<br>
+This aspect will help us to look at number of artist associated with each genre. This analysis is to rollout that if Hip-Hop has high number of artist then this could be a reason but it does not look like that.  
+
+```{r genre with artist list, warning=FALSE, message=FALSE}
+
+
+library(sqldf)
+sqldf('select genre, count(distinct artist) as artist_count from dt_lyrics group by 1 order by count(distinct artist) desc')%>%
+ggplot(aes(x=reorder(genre,desc(artist_count)),y=artist_count,fill=artist_count))+geom_bar(position='dodge',stat='identity')+xlab('genre')+ylab('artist_count')+coord_flip()
+
+```
+
+#### Last five year trend of Hip-Hop sentiments
+<br>
+Now, we are verifying  any change is happened in emotion frequency for last five years and found that it looks like Hip-Hop has a consistent trend.
+
+```{r Last 5 yearly trend of hip-hop, warning=FALSE, message=FALSE}
+
+dt_lyrics%>%
+  group_by(id)%>%
+  unnest_tokens(output = word, input = stemmedwords)%>%
+  inner_join(nrc)%>%
+  group_by(id,year,sentiment,genre)%>%
+  count()%>%
+  group_by(year, sentiment, genre)%>%
+  filter(genre %in% c('Hip-Hop') && year %in% c('2016','2015', '2014', '2013', '2012') )%>%
+  summarize(n = mean(n))%>%
+  ungroup()%>%
+  ggplot(aes(x=year,y=n,fill=sentiment))+
+  geom_col()+
+  facet_wrap(~sentiment)+
+  guides(fill=F)+coord_flip()
+
+```
+
+
+## Summary
+<br>
+After conducting series of analysis through various dimension (genre word count, songs in genre, lyrics from artists), I have concluded that hip pop has the highest emotion flexibility. Following questions are addressing impact of hip-hop genre music stream. 
+
+### Q1 - Sentiment Impact on Hip-Hap
+
+
+This analysis has brought our attention towards Hip-Hop genre which is contributing majorly in all variation of sentiments in lyrics. To cross verify our analysis, we executed follow analysis which further proved that Hip-Hop has highest trend to effect emotions of music listener, they are consuming mostly keywords that can generate different sentiments. Usually, it is linked to vocalize such words in a tone that can hit or click to listener immediately. 
+
+Based on market research and personal assessment, people encourage positive sentiments coming out of lyrics instead of pulling mostly depression, sadness, fear and negativity so if hip-hap will remain consistent to such emotions then songs popularity will definitely be impacted.
+ 
+
+### Q2 - What has made hip-hop songs more successful in past years ? 
+
+Hip-hop/ Rap music was a big step for music, as it was very unconventional as the artists weren’t singing.  Genre wise, N.W.A tick all the boxes that are in the hip-hop genre- Repetitive beats with a hook, rapping, samples, and so on, and they were one of the most important and influential groups in hip-hop. The psychology of music is a very deep study. Just because a piece of music or a specific genre is touted as uplifting or depressing, doesn’t necessarily mean that it will forcefully alter your mood.
+
+Hip-Hop high spike is consistent for last five years trends in term of emotion and billboard which show that artists are not evolving lyrics and eliminating strong keywords associated to emotions. Last couple of years, people are more aware about negative sentiment impact and turning out more protective about kids and new listeners. This can be a big threat to hip-hop industry. 
+
+
+## Recommendation
+<br>
+What makes a song successful is very much dependent on which genre it belongs to. Hip pop tends to have a stronger message, profane lyrics in all segment, talking about the pain and struggles of the author. Hip Pop singers tend to focus on love and breakup, using more positive words and they are about relationships.
+
+The analysis tells us what society wants to hear. This kind of analysis can be applied to marketing slogan or copywriter for different target customers. Or we can go further with other types of writings like novels, essays, news articles and so on.
+
+We strongly recommend artist assoicated to Hip-Hop genre to focus on changing tone and lyrics keyword to bring more positive and joyful experience for listener.
+
+
+

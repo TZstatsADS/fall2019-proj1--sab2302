@@ -134,7 +134,7 @@ dt_lyrics <- dt_lyrics %>%
 ### Exporting the processed text data into a CSV file
 
 ```{r export data}
-save(dt_lyrics, file="../output/processed_lyrics.RData")
+save(dt_lyrics, file="../output/cleaned_lyrics.RData")
 ```
 
 The final processed data is ready to be used for any kind of analysis.

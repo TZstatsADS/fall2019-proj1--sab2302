@@ -1,0 +1,477 @@
+---
+title: "Lyrics_P1"
+author: "Ahsan Bukhari"
+date: "9/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Step 0 - Load all the required libraries
+
+From the packages' descriptions:
+
++ `tm` is a framework for text mining applications within R;
++ `data.table` is a package for fast aggregation of large data;
++ `tidyverse` is an opinionated collection of R packages designed for data science. All packages share an underlying design philosophy, grammar, and data structures;
++ `tidytext` allows text mining using 'dplyr', 'ggplot2', and other tidy tools;
++ `DT` provides an R interface to the JavaScript library DataTables.
+
+```{r load libraries, warning=FALSE, message=FALSE}
+library(tm)
+library(data.table)
+library(tidytext)
+library(tidyverse)
+library(DT)
+library(stringr)
+library(qdap)
+library(lexicon)
+library(ggplot2)
+library(ggthemes)
+library(wordcloud)
+```
+
+### Step 1 - Load the data to be cleaned and processed
+
+```{r}
+# load lyrics data
+load('/Users/ahsan.bukhari/Project/Columbia/AppliedDS/fall2019-proj1--sab2302/data/lyrics.RData') 
+```
+
+
+### Step 2 - Preliminary cleaning of text
+
+We clean the text by converting all the letters to the lower case, and removing punctuation, numbers, empty words and extra white space.
+
+```{r text processing in tm}
+# function for removimg leading and trailing whitespace from character strings 
+leadingWhitespace <- content_transformer(function(x) str_trim(x, side = "both"))
+# remove stop words
+data("stop_words")
+word <- c("lot", "today", "months", "month", "wanna", "wouldnt", "wasnt", "ha", "na", "ooh", "da",
+        "gonna", "im", "dont", "aint", "wont", "yeah", "la", "oi", "nigga", "fuck",
+          "hey", "year", "years", "last", "past", "feel")
+stop_words <- c(stop_words$word, word)
+# clean the data and make a corpus
+corpus <- VCorpus(VectorSource(dt_lyrics$lyrics))%>%
+  tm_map(content_transformer(tolower))%>%
+  tm_map(removePunctuation)%>%
+  tm_map(removeWords, character(0))%>%
+  tm_map(removeWords, stop_words)%>%
+  tm_map(removeNumbers)%>%
+  tm_map(stripWhitespace)%>%
+  tm_map(leadingWhitespace)
+```
+
+### Step 3 - Stemming words and converting tm object to tidy object
+
+Stemming reduces a word to its word *stem*. We stem the words here and then convert the "tm" object to a "tidy" object for much faster processing.
+
+```{r stemming}
+stemmed <- tm_map(corpus, stemDocument) %>%
+  tidy() %>%
+  select(text)
+```
+
+head(dt_lyrics)
+
+### Step 4 - Creating tidy format of the dictionary to be used for completing stems
+
+We also need a dictionary to look up the words corresponding to the stems.
+
+```{r tidy dictionary}
+dict <- tidy(corpus) %>%
+  select(text) %>%
+  unnest_tokens(dictionary, text)
+```
+
+### Step 5 - Combining stems and dictionary into the same tibble
+
+Here we combine the stems and the dictionary into the same "tidy" object.
+
+```{r tidy stems with dictionary}
+completed <- stemmed %>%
+  mutate(id = row_number()) %>%
+  unnest_tokens(stems, text) %>%
+  bind_cols(dict) 
+```
+
+### Step 6 - Stem completion
+
+Lastly, we complete the stems by picking the corresponding word with the highest frequency.
+
+```{r stem completion, warning=FALSE, message=FALSE}
+completed <- completed %>%
+  group_by(stems) %>%
+  count(dictionary) %>%
+  mutate(word = dictionary[which.max(n)]) %>%
+  ungroup() %>%
+  select(stems, word) %>%
+  distinct() %>%
+  right_join(completed) %>%
+  select(-stems)
+```
+
+### Step 8 - Pasting stem completed individual words into their respective lyrics
+
+We want our processed words to resemble the structure of the original lyrics. So we paste the words together to form processed lyrics.
+
+```{r reverse unnest}
+completed <- completed %>%
+  group_by(id) %>%
+  summarise(stemmedwords= str_c(word, collapse = " ")) %>%
+  ungroup()
+```
+
+### Step 9 - Keeping a track of the processed lyrics with their own ID
+
+```{r cleaned hm_data, warning=FALSE, message=FALSE}
+dt_lyrics <- dt_lyrics %>%
+  mutate(id = row_number()) %>%
+  inner_join(completed)
+```
+
+### Exporting the processed text data into a CSV file
+
+```{r export data}
+save(dt_lyrics, file="/Users/ahsan.bukhari/Project/Columbia/AppliedDS/fall2019-proj1--sab2302/output/cleaned_lyrics.RData")
+```
+
+The final processed data is ready to be used for any kind of analysis.
+
+
+
+### Basic Data Exploration for better understanding
+
+This step to start understanding dataset for better storyboard
+
+```{r basic data exploration}
+#str(dt_lyrics) # checking structure of cleaned_lyrics
+
+#nchar(dt_lyrics$stemmedwords[2]) # checking random character length of Song 2
+
+#str_count(string = dt_lyrics$stemmedwords[2], pattern = '\\S+') # checking number of words in Song 2
+
+mean(str_detect(string=tolower(dt_lyrics$stemmedwords),pattern='romance'))*100 #checking romance keyword usage in lyrics
+
+```
+
+
+### Most common words in Songs Lyrics
+
+look at top 25 famous words in songs lyrics
+
+```{r top 25 words}
+plot(freq_terms(text.var = dt_lyrics$stemmedwords,top = 25))
+
+```
+
+### Emotion Analysis
+
+Loading NRC from lexicon libaray to explore emotion associated to songs lyrics
+
+```{r emotion analysis}
+#head(hash_sentiment_nrc)
+
+dt_lyrics %>%
+  select(id, stemmedwords)%>%
+  group_by(id)%>%
+  unnest_tokens(output = word, input = stemmedwords)%>%
+  inner_join(y = hash_sentiment_nrc,by = c('word'='x'))%>%
+  ungroup()%>%
+  group_by(y)%>%
+  summarize(count = n())%>%
+  ungroup()
+
+```
+
+### Emotional analysis II
+
+further exploration
+
+```{r emotional analysis II}
+#nrc = read.table(file = 'https://raw.githubusercontent.com/pseudorational/data/master/nrc_lexicon.txt',header = F,col.names = c('word','sentiment','num'),sep = '\t'); nrc = nrc[nrc$num!=0,]; nrc$num = NULL
+
+#nrc%>%
+#  group_by(sentiment)%>%
+#  count()
+
+dt_lyrics%>%
+  group_by(id)%>%
+  unnest_tokens(output = word, input = stemmedwords)%>%
+  inner_join(nrc)%>%
+  group_by(sentiment)%>%
+  count()%>%
+  ggplot(aes(x=reorder(sentiment,X = n),y=n,fill=sentiment))+geom_col()+guides(fill=F)+coord_flip()+theme_wsj()
+
+```
+
+
+### sentiment score of lyrics
+
+further exploration
+
+```{r sentiment score of lyrics}
+dt_lyrics %>%
+  select(id,stemmedwords)%>%
+  group_by(id)%>%
+  unnest_tokens(output=word,input=stemmedwords)%>%
+  inner_join(key_sentiment_jockers)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.1)+
+  scale_x_continuous(breaks=seq(-5,5,1))+scale_fill_manual(values=c('tomato','seagreen'))+
+  guides(fill=F)+
+  theme_wsj()
+
+```
+
+
+### Wordcloud of lyrics Positive & Negative
+
+further exploration
+
+```{r wordcloud of lyrics}
+
+library(tidyr)
+wordcloudData = 
+  dt_lyrics%>%
+  group_by(id)%>%
+  unnest_tokens(output=word,input=stemmedwords)%>%
+  inner_join(get_sentiments('bing'))%>%
+  ungroup()%>%
+  count(sentiment,word,sort=T)%>%
+  spread(key=sentiment,value = n,fill=0)%>%
+  data.frame()
+rownames(wordcloudData) = wordcloudData[,'word']
+wordcloudData = wordcloudData[,c('positive','negative')]
+set.seed(617)
+comparison.cloud(term.matrix = wordcloudData,scale = c(1.5,0.5),max.words = 400, rot.per=0)
+
+```
+
+
+
+
+### Emotional analysis deeper to Genre and artist
+
+further exploration
+
+```{r emotional analysis deeper to genre}
+
+
+dt_lyrics%>%
+  group_by(id)%>%
+  unnest_tokens(output = word, input = stemmedwords)%>%
+  inner_join(nrc)%>%
+  group_by(id,sentiment,genre)%>%
+  count()%>%
+  group_by(sentiment, genre)%>%
+  filter(!genre %in% c('Other','Not Available'))%>%
+  summarize(n = mean(n))%>%
+  ungroup()%>%
+  ggplot(aes(x=genre,y=n,fill=sentiment))+
+  geom_col()+
+  facet_wrap(~sentiment)+
+  guides(fill=F)+coord_flip()
+
+```
+
+
+### Genre analysis further to explore Hip-hop
+
+further exploration
+
+```{r hip-hop analysis}
+
+
+genre_word_count = dt_lyrics %>%
+  select(genre,stemmedwords)%>%
+  group_by(genre)%>%
+  unnest_tokens(output = word,input=stemmedwords)%>%
+  ungroup()%>%
+  group_by(genre)%>%
+  count()%>%   # count is a shortcut to summarize used above
+  arrange(desc(n))
+
+```
+
+
+### Genre analysis for list of songs
+
+further exploration
+
+```{r list of songs for genre}
+
+genre_song_list = dt_lyrics %>%
+  select(id,genre)%>%
+  group_by(genre)%>%
+  count()%>%   # count is a shortcut to summarize used above
+  arrange(desc(n))
+
+genre_list = cbind(genre_song_list,genre_word_count)
+genre_list$genre1 = NULL
+
+ggplot(genre_list, aes(x=genre, y = n, fill = n1))+
+  geom_bar(stat = 'identity', position = 'dodge')
+
+```
+
+
+
+### Genre analysis for list of songs
+
+further exploration
+
+```{r topic Modelling}
+
+dtm <- DocumentTermMatrix(corpus)
+
+#Set parameters for Gibbs sampling
+burnin <- 4000
+iter <- 2000
+thin <- 500
+seed <-list(2003,5,63,100001,765)
+nstart <- 5
+best <- TRUE
+
+#Number of topics
+k <- 15
+#Run LDA using Gibbs sampling
+ldaOut <-LDA(dtm, k, method="Gibbs", control=list(nstart=nstart, 
+                                                 seed = seed, best=best,
+                                                 burnin = burnin, iter = iter, 
+                                                 thin=thin))
+
+
+```
+
+
+
+# Most Impacted Genre - Sentiment Analysis
+
+When people talk about the history of music, rock 'n' roll is always the hero. But a study from the University of London, Imperial College London and Last.fm, published Wednesday in the Royal Society Open Science journal, has revealed that rock 'n' roll isn't all it's cracked up to be.
+
+
+In the last half-century, hip-hop has actually proven to be the most influential genre in popular music.
+
+
+
+library(sqldf)
+sqldf('select artist, count(id) from dt_lyrics group by 1 order by count(id) desc limit 5')
+
+## Next step to prepare storyboard based on Lexicon like 
+## year wise emotional analysis on lyrics
+## then map it to artist wise emtional analyis of songs
+## further explore text mining html of framework II 
+## last attempt to bring it to on shinnyappx
+
+
+# Dataset Exploration
+
+```{r basic data exploration}
+print('--------------------Data Structure')
+str(dt_lyrics) # checking structure of cleaned_lyrics
+print('--------------------Command Ended')
+print("------------------------------------------------------------")
+print("--------------------Character length of song # 2")
+nchar(dt_lyrics$stemmedwords[2]) # checking random character length of Song 2
+print("--------------------Command Ended")
+print("------------------------------------------------------------")
+print("--------------------Word ount of song # 2")
+str_count(string = dt_lyrics$stemmedwords[2], pattern = '\\S+') # checking number of words in Song 2
+print("--------------------Command Ended")
+print("------------------------------------------------------------")
+print("--------------------Checking 'Romance' keyword usage")
+mean(str_detect(string=tolower(dt_lyrics$stemmedwords),pattern='romance'))*100 #checking romance keyword usage in lyrics
+print("--------------------Command Ended")
+
+
+```
+
+# Emotion expression in lyrics
+
+Idea to get overall emotion expression in all song's lyrics and then narrow it down to genre level
+
+```{r emotion expression}
+
+
+dt_lyrics%>%
+  group_by(id)%>%
+  unnest_tokens(output = word, input = stemmedwords)%>%
+  inner_join(nrc)%>%
+  group_by(sentiment)%>%
+  count()%>%
+  ggplot(aes(x=reorder(sentiment,X = n),y=n,fill=sentiment))+geom_col()+guides(fill=F)+coord_flip()+theme_wsj(color = "blue")
+
+
+```
+
+# Wordcloud of lyrics Positive & Negative
+
+further exploration
+
+```{r wordcloud of lyrics}
+
+wordcloudData = 
+  dt_lyrics%>%
+  group_by(id)%>%
+  unnest_tokens(output=word,input=stemmedwords)%>%
+  inner_join(nrc)%>%
+  ungroup()%>%
+  count(sentiment,word,sort=T)%>%
+  spread(key=sentiment,value = n,fill=0)%>%
+  data.frame()
+rownames(wordcloudData) = wordcloudData[,'word']
+wordcloudData = wordcloudData[,c('fear','trust','anger','disgust')]
+comparison.cloud(term.matrix = wordcloudData,scale = c(2,0.5),max.words = 250, rot.per=0)
+
+```
+
+
+
+#### Correlation between emotions and genre
+
+
+
+```{r correlation between emotion and genre, warning=FALSE, message=FALSE}
+
+
+
+dt_lyrics$genre_n = as.integer(factor(dt_lyrics$genre, levels=c("Rock","Pop","Metal","Hip-Hop","Country","Jazz","Electronic","R&B","Indie","Folk","Others","Not Available"), labels=c(1,2,3,4,5,6,7,8,9,10,11,12)))
+
+
+dt_lyrics%>%
+  group_by(id)%>%
+  unnest_tokens(output = word, input = stemmedwords)%>%
+  inner_join(nrc)%>%
+  group_by(id,sentiment,genre_n)%>%
+  count()%>%
+  ungroup()%>%
+  group_by(sentiment)%>%
+  summarize(correlation = cor(genre_n,n))
+
+dt_lyrics %>%
+  select(id,genre_n,stemmedwords)%>%
+  group_by(genre_n)%>%
+  unnest_tokens(output = word,input=stemmedwords)%>%
+  inner_join(nrc)%>%
+  group_by(id,sentiment,genre_n)%>%
+  group_by(genre)%>%
+  filter(!genre %in% c('Other','Not Available'))%>%
+  count()
+
+dt_lyrics%>%
+  group_by(id)%>%
+  unnest_tokens(output = word, input = stemmedwords)%>%
+  inner_join(nrc)%>%
+  group_by(id,sentiment,genre_n)%>%
+  count()%>%
+  ungroup()%>%
+  group_by(sentiment)%>%
+  ggplot(aes(x=genre_n,y=n))+geom_point()+facet_wrap(~sentiment)+geom_smooth(method='lm',se=F)
+
+```
